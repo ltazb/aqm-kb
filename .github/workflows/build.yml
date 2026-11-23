@@ -12,20 +12,18 @@ jobs:
           repository: HwFans/AQM_AL10HN_02_HM_opensource
           fetch-depth: 1
           sparse-checkout: kernel
-      - name: Restore out + ccache
+      - name: Restore out
         uses: actions/cache@v4
         with:
-          path: |
-            out
-            .ccache
-          key: orlando-chunk-v2-${{ github.run_number }}
+          path: out
+          key: orlando-clang-v3-${{ github.run_number }}
           restore-keys: |
-            orlando-chunk-v2-
+            orlando-clang-v3-
             orlando-chunk-v1
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler ccache
+          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
       - name: Toolchain + bind-mount short srctree
         run: |
           set -e
@@ -41,10 +39,12 @@ jobs:
             sudo mkdir -p "$ROOT/prebuilts/clang/host/linux-x86"
             sudo ln -sfn /opt/clanghw "$ROOT/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
-          mkdir -p "$WS/out" "$WS/.ccache"
+          mkdir -p "$WS/out"
           cd /k && /bin/pwd
           echo "--- restored objects ---"
           find "$WS/out" -name '*.o' 2>/dev/null | wc -l
+          echo "--- Makefile CC lines ---"
+          grep -n -m4 -E '^CC[[:space:]]*[:?]?=' /k/Makefile || true
       - name: Configure if no .config
         run: |
           set +e
@@ -59,26 +59,22 @@ jobs:
             echo "config present, skip"
           fi
           exit 0
-      - name: Build chunk (13 min)
+      - name: Build chunk (13 min, clang only)
         run: |
           set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-          export CCACHE_MAXSIZE=4G
-          timeout --signal=INT --kill-after=45 780 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 CC="ccache /opt/gcc49/bin/aarch64-linux-android-gcc" vmlinux > /tmp/build.log 2>&1
+          timeout --signal=INT --kill-after=45 780 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC (124=chunk timeout)"
           echo "===== objects ====="
           find "$GITHUB_WORKSPACE/out" -name '*.o' 2>/dev/null | wc -l
-          echo "===== ccache ====="
-          ccache -s | head -5
           echo "===== vmlinux yet? ====="
           ls -la "$GITHUB_WORKSPACE/out/vmlinux" 2>/dev/null || echo "not linked yet"
           echo "===== errors ====="
-          grep -n -E "error:|Error [0-9]" /tmp/build.log | head -10
+          grep -n -E "error:|Error [0-9]" /tmp/build.log | head -12
           echo "===== last 10 ====="
           tail -10 /tmp/build.log
           exit 0
