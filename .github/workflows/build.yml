@@ -16,9 +16,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out
-          key: orlando-clang-v3-${{ github.run_number }}
+          key: orlando-clang-v4-${{ github.run_number }}
           restore-keys: |
-            orlando-clang-v3-
+            orlando-clang-v4-
             orlando-chunk-v1
       - name: Install deps
         run: |
@@ -59,14 +59,14 @@ jobs:
             echo "config present, skip"
           fi
           exit 0
-      - name: Build chunk (13 min, clang only)
+      - name: Build chunk (18 min, clang only)
         run: |
           set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          timeout --signal=INT --kill-after=45 780 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
+          timeout --signal=INT --kill-after=45 1080 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC (124=chunk timeout)"
           echo "===== objects ====="
