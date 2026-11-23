@@ -39,7 +39,8 @@ jobs:
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
           make O=../out ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
           tail -3 /tmp/cfg.log
-          ls -la ../out/.config
+          echo "--- stack validation / objtool config ---"
+          grep -E "CONFIG_STACK_VALIDATION|CONFIG_UNWINDER|CONFIG_FTRACE_MCOUNT" ../out/.config || true
       - name: Build with full error capture
         run: |
           set +e
@@ -47,13 +48,16 @@ jobs:
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=../out ARCH=arm64 -j$(nproc) > /tmp/build.log 2>&1
+          make O=../out ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC"
           echo "===== ERROR LINES ====="
-          grep -n -E "error:|Error [0-9]|fatal error|undefined reference" /tmp/build.log | head -40
-          echo "===== LAST 40 ====="
-          tail -40 /tmp/build.log
+          grep -n -E "error:|Error [0-9]|fatal error|undefined reference|not found" /tmp/build.log | head -20
+          echo "===== CONTEXT AROUND FIRST ERROR ====="
+          N=$(grep -n -E "Error 127" /tmp/build.log | head -1 | cut -d: -f1)
+          if [ -n "$N" ]; then sed -n "$((N-20)),$((N+3))p" /tmp/build.log; fi
+          echo "===== LAST 25 ====="
+          tail -25 /tmp/build.log
           echo "===== END ====="
           exit 0
       - name: Show results
