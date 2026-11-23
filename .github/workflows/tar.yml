@@ -1,0 +1,19 @@
+name: tar-kernel
+on: workflow_dispatch
+jobs:
+  tar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: kernel
+      - name: Tar kernel
+        run: |
+          tar czf /tmp/kernel.tgz kernel
+          ls -lh /tmp/kernel.tgz
+          echo "files=$(find kernel -type f | wc -l)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-src
+          path: /tmp/kernel.tgz
+          retention-days: 7
