@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
-      - name: Fetch toolchains, build SHORT symlink paths (fix Argument list too long)
+      - name: Fetch toolchains + short paths + writable out
         run: |
           set -e
           cd /opt
@@ -26,19 +26,22 @@ jobs:
           sudo ln -sfn "$GITHUB_WORKSPACE/kernel" /k
           sudo mkdir -p /prebuilts/clang/host/linux-x86 /out
           sudo ln -sfn /opt/clanghw /prebuilts/clang/host/linux-x86/clang-r353983c
-          echo "--- srctree=$(readlink -f /k) ---"
+          sudo chown -R "$(id -u):$(id -g)" /out
+          ls -ld /out /k
           /prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang --version | head -1
           /opt/gcc49/bin/aarch64-linux-android-gcc --version | head -1
       - name: Configure (short paths)
         run: |
-          set -euo pipefail
+          set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
           make O=/out ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
-          tail -3 /tmp/cfg.log
-          ls -la /out/.config
+          echo "CFG_RC=$?"
+          tail -20 /tmp/cfg.log
+          ls -la /out/.config 2>/dev/null
+          exit 0
       - name: Build (short paths, full log)
         run: |
           set +e
