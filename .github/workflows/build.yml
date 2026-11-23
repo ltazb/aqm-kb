@@ -1,0 +1,51 @@
+name: build-orlando
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout kernel tree
+        uses: actions/checkout@v4
+        with:
+          repository: HwFans/AQM_AL10HN_02_HM_opensource
+          fetch-depth: 1
+          sparse-checkout: kernel
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
+      - name: Fetch GCC49 and clang
+        run: |
+          cd /opt
+          sudo git clone -q --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc49
+          sudo chmod -R +x /opt/gcc49/bin || true
+          sudo git clone -q --depth 1 https://github.com/picasso09/clang-9.0.3-r353983c1.git clanghw
+          sudo chmod -R +x /opt/clanghw/bin || true
+          /opt/gcc49/bin/aarch64-linux-android-gcc --version | head -1
+      - name: Configure
+        run: |
+          set -e
+          cd kernel
+          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
+          export ARCH=arm64
+          export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
+          make O=../out ARCH=arm64 merge_orlando_defconfig
+      - name: Build
+        run: |
+          cd kernel
+          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
+          export ARCH=arm64
+          export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
+          make O=../out ARCH=arm64 -j$(nproc) 2>&1 | tail -120
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orlando
+          path: |
+            out/vmlinux
+            out/System.map
+            out/arch/arm64/boot/Image.gz
+            out/.config
