@@ -12,6 +12,15 @@ jobs:
           repository: HwFans/AQM_AL10HN_02_HM_opensource
           fetch-depth: 1
           sparse-checkout: kernel
+      - name: Restore out + ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            out
+            .ccache
+          key: orlando-out-v1-${{ github.run_id }}
+          restore-keys: |
+            orlando-out-v1-
       - name: Install deps
         run: |
           sudo apt-get update -qq
@@ -23,7 +32,7 @@ jobs:
           sudo git clone -q --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc49
           sudo git clone -q --depth 1 https://github.com/picasso09/clang-9.0.3-r353983c1.git clanghw
           sudo chmod -R +x /opt/gcc49/bin /opt/clanghw/bin || true
-          sudo mkdir -p /k /out /prebuilts/clang/host/linux-x86
+          sudo mkdir -p /k /prebuilts/clang/host/linux-x86
           sudo mount --bind "$GITHUB_WORKSPACE/kernel" /k
           sudo ln -sfn /opt/clanghw /prebuilts/clang/host/linux-x86/clang-r353983c
           WS="$GITHUB_WORKSPACE"; PARENT="$(dirname "$WS")"
@@ -31,9 +40,10 @@ jobs:
             sudo mkdir -p "$ROOT/prebuilts/clang/host/linux-x86"
             sudo ln -sfn /opt/clanghw "$ROOT/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
-          sudo chown -R "$(id -u):$(id -g)" /out
-          cd /k && /bin/pwd && ls /k/Makefile
+          mkdir -p "$WS/out" "$WS/.ccache"
+          cd /k && /bin/pwd
           /prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang --version | head -1
+          ccache --version | head -1
       - name: Configure
         run: |
           set +e
@@ -41,10 +51,9 @@ jobs:
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=/out ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
+          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
           echo "CFG_RC=$?"
-          tail -10 /tmp/cfg.log
-          ls -la /out/.config 2>/dev/null
+          tail -6 /tmp/cfg.log
           exit 0
       - name: Build vmlinux
         run: |
@@ -53,32 +62,31 @@ jobs:
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          export CCACHE_DIR=/tmp/ccACHE
-          printf '#!/bin/sh\nexec ccache /opt/gcc49/bin/aarch64-linux-android-gcc "$@"\n' > /tmp/gccwrap.sh
-          chmod +x /tmp/gccwrap.sh
-          make O=/out ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) vmlinux > /tmp/build.log 2>&1
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_MAXSIZE=5G
+          export CC="ccache /opt/gcc49/bin/aarch64-linux-android-gcc"
+          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) vmlinux > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC"
+          echo "===== CCACHE STATS ====="
+          ccache -s | head -8
           echo "===== ERROR LINES ====="
-          grep -n -E "error:|Error [0-9]|Argument list" /tmp/build.log | head -20
-          echo "===== CONTEXT ====="
-          N=$(grep -n -E "Error 127|Argument list" /tmp/build.log | head -1 | cut -d: -f1)
-          if [ -n "$N" ]; then sed -n "$((N-15)),$((N+3))p" /tmp/build.log; fi
-          echo "===== LAST 25 ====="
-          tail -25 /tmp/build.log
+          grep -n -E "error:|Error [0-9]|Argument list" /tmp/build.log | head -15
+          echo "===== LAST 20 ====="
+          tail -20 /tmp/build.log
           echo "===== END ====="
           exit 0
       - name: Show results
         if: always()
         run: |
-          ls -la /out/vmlinux /out/System.map 2>/dev/null
-          ls -la /out/ 2>/dev/null | head -15
+          ls -la "$GITHUB_WORKSPACE/out/vmlinux" "$GITHUB_WORKSPACE/out/System.map" 2>/dev/null
+          du -sh "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/.ccache" 2>/dev/null
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: orlando
           path: |
-            /out/vmlinux
-            /out/System.map
-            /out/.config
+            out/vmlinux
+            out/System.map
+            out/.config
