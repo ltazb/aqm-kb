@@ -1,0 +1,21 @@
+name: tar-clang
+on: workflow_dispatch
+jobs:
+  tar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: picasso09/clang-9.0.3-r353983c1
+          fetch-depth: 1
+      - run: |
+          ls
+          du -sh .
+          tar czf /tmp/clang.tgz .
+          ls -lh /tmp/clang.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-hw
+          path: /tmp/clang.tgz
+          retention-days: 7
