@@ -15,30 +15,44 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
-      - name: Fetch GCC49 and clang
+          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler wget
+      - name: Fetch toolchains and place where Makefile expects
         run: |
+          set -e
           cd /opt
           sudo git clone -q --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc49
-          sudo chmod -R +x /opt/gcc49/bin || true
           sudo git clone -q --depth 1 https://github.com/picasso09/clang-9.0.3-r353983c1.git clanghw
-          sudo chmod -R +x /opt/clanghw/bin || true
-          /opt/gcc49/bin/aarch64-linux-android-gcc --version | head -1
+          sudo chmod -R +x /opt/gcc49/bin /opt/clanghw/bin || true
+          sudo mkdir -p "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86"
+          sudo ln -sfn /opt/clanghw "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r353983c"
+          ls -l "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/"
+          "$GITHUB_WORKSPACE/prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang" --version | head -2
+      - name: Build make 4.2.1 (kernel 4.14 needs old make)
+        run: |
+          set -e
+          cd /tmp
+          wget -q https://ftp.gnu.org/gnu/make/make-4.2.1.tar.gz
+          tar xf make-4.2.1.tar.gz
+          cd make-4.2.1
+          ./configure --prefix=/opt/make42 >/dev/null
+          make -j4 >/dev/null 2>&1
+          sudo make install >/dev/null
+          /opt/make42/bin/make --version | head -1
       - name: Configure
         run: |
           set -e
           cd kernel
-          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
+          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:/opt/make42/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=../out ARCH=arm64 merge_orlando_defconfig
+          /opt/make42/bin/make O=../out ARCH=arm64 merge_orlando_defconfig
       - name: Build
         run: |
           cd kernel
-          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
+          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:/opt/make42/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=../out ARCH=arm64 -j$(nproc) 2>&1 | tail -120
+          /opt/make42/bin/make O=../out ARCH=arm64 -j$(nproc) 2>&1 | tail -150
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
