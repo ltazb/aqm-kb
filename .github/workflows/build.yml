@@ -4,7 +4,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 300
+    timeout-minutes: 350
     steps:
       - name: Checkout kernel tree
         uses: actions/checkout@v4
@@ -15,7 +15,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
+          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler ccache
       - name: Toolchain + bind-mount short srctree
         run: |
           set -e
@@ -32,12 +32,8 @@ jobs:
             sudo ln -sfn /opt/clanghw "$ROOT/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
           sudo chown -R "$(id -u):$(id -g)" /out
-          echo "--- getcwd via /k ---"
-          cd /k && /bin/pwd
-          ls /k/Makefile
-          echo "--- clang at short path ---"
+          cd /k && /bin/pwd && ls /k/Makefile
           /prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang --version | head -1
-          ls -ld /out
       - name: Configure
         run: |
           set +e
@@ -47,17 +43,20 @@ jobs:
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
           make O=/out ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
           echo "CFG_RC=$?"
-          tail -15 /tmp/cfg.log
+          tail -10 /tmp/cfg.log
           ls -la /out/.config 2>/dev/null
           exit 0
-      - name: Build
+      - name: Build vmlinux
         run: |
           set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=/out ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) > /tmp/build.log 2>&1
+          export CCACHE_DIR=/tmp/ccACHE
+          printf '#!/bin/sh\nexec ccache /opt/gcc49/bin/aarch64-linux-android-gcc "$@"\n' > /tmp/gccwrap.sh
+          chmod +x /tmp/gccwrap.sh
+          make O=/out ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) vmlinux > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC"
           echo "===== ERROR LINES ====="
@@ -65,15 +64,15 @@ jobs:
           echo "===== CONTEXT ====="
           N=$(grep -n -E "Error 127|Argument list" /tmp/build.log | head -1 | cut -d: -f1)
           if [ -n "$N" ]; then sed -n "$((N-15)),$((N+3))p" /tmp/build.log; fi
-          echo "===== LAST 20 ====="
-          tail -20 /tmp/build.log
+          echo "===== LAST 25 ====="
+          tail -25 /tmp/build.log
           echo "===== END ====="
           exit 0
       - name: Show results
         if: always()
         run: |
-          ls -la /out/ 2>/dev/null | head -20
-          ls -la /out/arch/arm64/boot/ 2>/dev/null | head
+          ls -la /out/vmlinux /out/System.map 2>/dev/null
+          ls -la /out/ 2>/dev/null | head -15
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,5 +81,4 @@ jobs:
           path: |
             /out/vmlinux
             /out/System.map
-            /out/arch/arm64/boot/Image.gz
             /out/.config
