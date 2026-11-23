@@ -4,7 +4,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout kernel tree
         uses: actions/checkout@v4
@@ -16,76 +16,65 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out
-          key: orlando-clang-v5-${{ github.run_number }}
+          key: orlando-lld-v6-${{ github.run_number }}
           restore-keys: |
             orlando-clang-v5-
             orlando-chunk-v1
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
-      - name: Toolchain + bind-mount short srctree
+          sudo apt-get install -y -qq lld bc bison flex libssl-dev libelf-dev
+          ld.lld --version
+      - name: Toolchain
         run: |
-          set -e
-          cd /opt
-          sudo git clone -q --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc49
-          sudo git clone -q --depth 1 https://github.com/picasso09/clang-9.0.3-r353983c1.git clanghw
-          sudo chmod -R +x /opt/gcc49/bin /opt/clanghw/bin || true
-          sudo mkdir -p /k /prebuilts/clang/host/linux-x86
-          sudo mount --bind "$GITHUB_WORKSPACE/kernel" /k
-          sudo ln -sfn /opt/clanghw /prebuilts/clang/host/linux-x86/clang-r353983c
-          WS="$GITHUB_WORKSPACE"; PARENT="$(dirname "$WS")"
-          for ROOT in "$WS" "$PARENT"; do
-            sudo mkdir -p "$ROOT/prebuilts/clang/host/linux-x86"
-            sudo ln -sfn /opt/clanghw "$ROOT/prebuilts/clang/host/linux-x86/clang-r353983c"
+          git clone --depth 1 https://github.com/picasso09/clang-9.0.3-r353983c1.git /tmp/clanghw 2>&1 | tail -1
+          git clone --depth 1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git /tmp/gcc49 2>&1 | tail -1
+          ls /tmp/gcc49/bin | head -3
+          sudo mkdir -p /prebuilts/clang/host/linux-x86
+          sudo ln -sfn /tmp/clanghw /prebuilts/clang/host/linux-x86/clang-r353983c
+          for d in "$GITHUB_WORKSPACE" "$(dirname $GITHUB_WORKSPACE)"; do
+            sudo mkdir -p "$d/prebuilts/clang/host/linux-x86"
+            sudo ln -sfn /tmp/clanghw "$d/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
-          mkdir -p "$WS/out"
-          cd /k && /bin/pwd
-          echo "--- runner cores ---"; nproc; echo "--- mem ---"; free -g | head -2; echo "--- restored objects ---"
-          find "$WS/out" -name '*.o' 2>/dev/null | wc -l
-          echo "--- Makefile CC lines ---"
-          grep -n -m4 -E '^CC[[:space:]]*[:?]?=' /k/Makefile || true
-      - name: Configure if no .config
+          nproc
+          free -g | head -2
+      - name: Bind mount
+        run: |
+          sudo mkdir -p /k
+          sudo mount --bind "$GITHUB_WORKSPACE/kernel" /k
+          mkdir -p out
+          ls /k/Makefile
+      - name: Configure
         run: |
           set +e
           cd /k
-          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
-          export ARCH=arm64
-          export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
+          export PATH=/tmp/gcc49/bin:$PATH
           if [ ! -f "$GITHUB_WORKSPACE/out/.config" ]; then
-            make O="$GITHUB_WORKSPACE/out" ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
-            echo "CFG_RC=$?"; tail -4 /tmp/cfg.log
+            make O="$GITHUB_WORKSPACE/out" ARCH=arm64 CROSS_COMPILE=/tmp/gcc49/bin/aarch64-linux-android- merge_orlando_defconfig > /tmp/cfg.log 2>&1
+            echo "CFG_RC=$?"
+            tail -6 /tmp/cfg.log
           else
-            echo "config present, skip"
+            echo "config exists"
           fi
-          exit 0
-      - name: Build chunk (20 min, 4-core)
+      - name: Build with lld
         run: |
           set +e
           cd /k
-          export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
-          export ARCH=arm64
-          export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          timeout --signal=INT --kill-after=45 1200 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
-          RC=$?
-          echo "MAKE_RC=$RC (124=chunk timeout)"
-          echo "===== objects ====="
-          find "$GITHUB_WORKSPACE/out" -name '*.o' 2>/dev/null | wc -l
-          echo "===== vmlinux yet? ====="
-          ls -la "$GITHUB_WORKSPACE/out/vmlinux" 2>/dev/null || echo "not linked yet"
-          echo "===== errors ====="
-          grep -n -E "error:|Error [0-9]" /tmp/build.log | head -12
-          echo "===== last 10 ====="
-          tail -10 /tmp/build.log
-          exit 0
-      - name: Upload vmlinux if ready
+          export PATH=/tmp/gcc49/bin:/tmp/clanghw/bin:$PATH
+          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 CROSS_COMPILE=/tmp/gcc49/bin/aarch64-linux-android- SKIP_STACK_VALIDATION=1 LD=ld.lld -j4 vmlinux > /tmp/build.log 2>&1
+          echo "MAKE_RC=$?"
+          echo "OBJ=$(find "$GITHUB_WORKSPACE/out" -name "*.o" | wc -l)"
+          ls -la "$GITHUB_WORKSPACE/out/vmlinux" 2>/dev/null || echo no_vmlinux
+          echo "=== errors ==="
+          grep -n -E "error:|Error [0-9]" /tmp/build.log | head -10
+          echo "=== last ==="
+          tail -8 /tmp/build.log
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: orlando-vmlinux
+          name: orlando-out
           path: |
             out/vmlinux
             out/System.map
-            out/.config
-          if-no-files-found: ignore
-          retention-days: 7
+            out/arch/arm64/boot/Image.gz
+          if-no-files-found: warn
