@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential bc bison flex libssl-dev libelf-dev python3 rsync cpio kmod unzip xz-utils device-tree-compiler
-      - name: Fetch toolchains and symlink both possible prebuilts roots
+      - name: Fetch toolchains and symlink prebuilts
         run: |
           set -e
           cd /opt
@@ -29,11 +29,7 @@ jobs:
             sudo mkdir -p "$ROOT/prebuilts/clang/host/linux-x86"
             sudo ln -sfn /opt/clanghw "$ROOT/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
-          echo "--- symlinks ---"
-          ls -l "$WS/prebuilts/clang/host/linux-x86/" "$PARENT/prebuilts/clang/host/linux-x86/"
-          echo "--- clang check (both paths) ---"
-          "$WS/kernel/../../prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang" --version | head -2
-          echo "--- gcc check ---"
+          "$WS/kernel/../../prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang" --version | head -1
           /opt/gcc49/bin/aarch64-linux-android-gcc --version | head -1
       - name: Configure
         run: |
@@ -42,16 +38,24 @@ jobs:
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=../out ARCH=arm64 merge_orlando_defconfig 2>&1 | tail -20
+          make O=../out ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
+          tail -5 /tmp/cfg.log
           ls -la ../out/.config
-      - name: Build
+      - name: Build (capture full log)
         run: |
           set -uo pipefail
           cd kernel
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O=../out ARCH=arm64 -j$(nproc) 2>&1 | tail -200
+          make O=../out ARCH=arm64 -j$(nproc) > /tmp/build.log 2>&1
+          echo "RC=$?"
+          echo "=== FIRST 40 ERROR LINES ==="
+          grep -n -iE "error:|Error [0-9]|undefined|unrecognized|No such file" /tmp/build.log | head -40 || true
+          echo "=== LAST 30 LINES ==="
+          tail -30 /tmp/build.log
+          echo "=== FIRST 20 LINES ==="
+          head -20 /tmp/build.log
       - name: Show results
         if: always()
         run: |
