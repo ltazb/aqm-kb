@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout kernel tree
@@ -16,9 +16,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out
-          key: orlando-clang-v4-${{ github.run_number }}
+          key: orlando-clang-v5-${{ github.run_number }}
           restore-keys: |
-            orlando-clang-v4-
+            orlando-clang-v5-
             orlando-chunk-v1
       - name: Install deps
         run: |
@@ -41,7 +41,7 @@ jobs:
           done
           mkdir -p "$WS/out"
           cd /k && /bin/pwd
-          echo "--- restored objects ---"
+          echo "--- runner cores ---"; nproc; echo "--- mem ---"; free -g | head -2; echo "--- restored objects ---"
           find "$WS/out" -name '*.o' 2>/dev/null | wc -l
           echo "--- Makefile CC lines ---"
           grep -n -m4 -E '^CC[[:space:]]*[:?]?=' /k/Makefile || true
@@ -59,14 +59,14 @@ jobs:
             echo "config present, skip"
           fi
           exit 0
-      - name: Build chunk (18 min, clang only)
+      - name: Build chunk (20 min, 4-core)
         run: |
           set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          timeout --signal=INT --kill-after=45 1080 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
+          timeout --signal=INT --kill-after=45 1200 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
           RC=$?
           echo "MAKE_RC=$RC (124=chunk timeout)"
           echo "===== objects ====="
