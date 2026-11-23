@@ -1,6 +1,5 @@
 name: build-orlando
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -36,7 +35,7 @@ jobs:
             sudo ln -sfn /tmp/clanghw "$d/prebuilts/clang/host/linux-x86/clang-r353983c"
           done
           nproc
-      - name: Bind mount and patch compiler check
+      - name: Mount and patch
         run: |
           sudo mkdir -p /k
           sudo mount --bind "$GITHUB_WORKSPACE/kernel" /k
@@ -45,11 +44,10 @@ jobs:
 import re
 p='/k/Makefile'
 s=open(p).read()
-s2=re.sub(r'(?ms)^prepare-compiler-check:.*?(?=^[A-Za-z0-9_.\-]+:)', 'prepare-compiler-check: FORCE\n\t@true\n\n', s, count=1)
+s2=re.sub(r'(?ms)^prepare-compiler-check:.*?(?=^[A-Za-z0-9_.-]+:)', 'prepare-compiler-check: FORCE\n\t@true\n\n', s, count=1)
 open(p,'w').write(s2)
 print('patched' if s2!=s else 'nochange')
 "
-          grep -n -A2 "^prepare-compiler-check" /k/Makefile | head -5
       - name: Configure
         run: |
           set +e
