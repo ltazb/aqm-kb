@@ -4,7 +4,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 350
+    timeout-minutes: 60
     steps:
       - name: Checkout kernel tree
         uses: actions/checkout@v4
@@ -18,9 +18,7 @@ jobs:
           path: |
             out
             .ccache
-          key: orlando-out-v1-${{ github.run_id }}
-          restore-keys: |
-            orlando-out-v1-
+          key: orlando-chunk-v1
       - name: Install deps
         run: |
           sudo apt-get update -qq
@@ -42,20 +40,24 @@ jobs:
           done
           mkdir -p "$WS/out" "$WS/.ccache"
           cd /k && /bin/pwd
-          /prebuilts/clang/host/linux-x86/clang-r353983c/bin/clang --version | head -1
-          ccache --version | head -1
-      - name: Configure
+          echo "--- existing out objects ---"
+          find "$WS/out" -name '*.o' 2>/dev/null | wc -l
+      - name: Configure if no .config
         run: |
           set +e
           cd /k
           export PATH=/opt/gcc49/bin:/opt/clanghw/bin:$PATH
           export ARCH=arm64
           export CROSS_COMPILE=/opt/gcc49/bin/aarch64-linux-android-
-          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
-          echo "CFG_RC=$?"
-          tail -6 /tmp/cfg.log
+          if [ ! -f "$GITHUB_WORKSPACE/out/.config" ]; then
+            make O="$GITHUB_WORKSPACE/out" ARCH=arm64 merge_orlando_defconfig > /tmp/cfg.log 2>&1
+            echo "CFG_RC=$?"
+            tail -5 /tmp/cfg.log
+          else
+            echo "config already present, skip"
+          fi
           exit 0
-      - name: Build vmlinux
+      - name: Build chunk (14 min)
         run: |
           set +e
           cd /k
@@ -65,23 +67,34 @@ jobs:
           export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
           export CCACHE_MAXSIZE=5G
           export CC="ccache /opt/gcc49/bin/aarch64-linux-android-gcc"
-          make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j$(nproc) vmlinux > /tmp/build.log 2>&1
+          timeout --signal=INT --kill-after=60 840 make O="$GITHUB_WORKSPACE/out" ARCH=arm64 SKIP_STACK_VALIDATION=1 -j8 vmlinux > /tmp/build.log 2>&1
           RC=$?
-          echo "MAKE_RC=$RC"
-          echo "===== CCACHE STATS ====="
-          ccache -s | head -8
-          echo "===== ERROR LINES ====="
-          grep -n -E "error:|Error [0-9]|Argument list" /tmp/build.log | head -15
-          echo "===== LAST 20 ====="
-          tail -20 /tmp/build.log
-          echo "===== END ====="
+          echo "MAKE_RC=$RC (124=timeout chunk)"
+          echo "===== objects so far ====="
+          find "$GITHUB_WORKSPACE/out" -name '*.o' 2>/dev/null | wc -l
+          echo "===== ccache ====="
+          ccache -s | head -6
+          echo "===== vmlinux? ====="
+          ls -la "$GITHUB_WORKSPACE/out/vmlinux" 2>/dev/null || echo "not yet linked"
+          echo "===== errors ====="
+          grep -n -E "error:|Error [0-9]" /tmp/build.log | head -10
+          echo "===== last 12 ====="
+          tail -12 /tmp/build.log
           exit 0
-      - name: Show results
+      - name: Package partial out
         if: always()
         run: |
-          ls -la "$GITHUB_WORKSPACE/out/vmlinux" "$GITHUB_WORKSPACE/out/System.map" 2>/dev/null
-          du -sh "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/.ccache" 2>/dev/null
-      - name: Upload
+          cd "$GITHUB_WORKSPACE"
+          tar -czf /tmp/out-partial.tgz out 2>/dev/null || true
+          ls -la /tmp/out-partial.tgz
+      - name: Upload partial
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out-partial
+          path: /tmp/out-partial.tgz
+          retention-days: 3
+      - name: Upload vmlinux if ready
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -90,3 +103,4 @@ jobs:
             out/vmlinux
             out/System.map
             out/.config
+          if-no-files-found: ignore
