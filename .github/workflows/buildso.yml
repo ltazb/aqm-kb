@@ -7,26 +7,29 @@ jobs:
       - uses: actions/checkout@v4
       - name: Find NDK
         run: |
-          ls /usr/local/lib/android/sdk/ndk/ 2>/dev/null || true
           NDKDIR=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
           echo "NDK=$NDKDIR"
           echo "NDK=$NDKDIR" >> $GITHUB_ENV
       - name: Build
         run: |
           export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          which clang
           cd dfx
+          mkdir -p ko
+          for n in android12-5.10 android13-5.10 android13-5.15 android14-5.15 android14-6.1 android15-6.6 android16-6.12 android17-6.18; do
+            printf 'X' > ko/dfroot-$n.ko
+          done
           clang --target=aarch64-linux-android29 -O2 -nostdlib -nostartfiles -ffreestanding -I. -D_GNU_SOURCE -o splicehelper splicehelper.c
-          echo "splicehelper size=$(stat -c%s splicehelper 2>/dev/null)"
-          clang --target=aarch64-linux-android29 -static -O2 -fno-stack-protector -I. -D_GNU_SOURCE -c -o exp.o exp.c
+          echo "splicehelper size=$(stat -c%s splicehelper)"
+          clang --target=aarch64-linux-android29 -static -O2 -fno-stack-protector -I. -D_GNU_SOURCE -c -o exp.o exp.c 2>&1 | tail -20
           echo "exp rc=$?"
-          clang --target=aarch64-linux-android29 -static -O2 -include stdint.h -I. -D_GNU_SOURCE -c -o elf_parser.o elf_parser.c
+          clang --target=aarch64-linux-android29 -static -O2 -include stdint.h -I. -D_GNU_SOURCE -c -o elf_parser.o elf_parser.c 2>&1 | tail -20
           echo "elf rc=$?"
-          clang --target=aarch64-linux-android29 -c -I. -o libcxx.o libcxx.S
+          clang --target=aarch64-linux-android29 -c -I. -o libcxx.o libcxx.S 2>&1 | tail -10
           echo "asm rc=$?"
-          clang --target=aarch64-linux-android29 -static -o libdfroot.so exp.o libcxx.o elf_parser.o
+          clang --target=aarch64-linux-android29 -static -o libdfroot.so exp.o libcxx.o elf_parser.o 2>&1 | tail -20
           echo "link rc=$?"
           ls -l libdfroot.so
+          file libdfroot.so
       - uses: actions/upload-artifact@v4
         with:
           name: so
