@@ -1,0 +1,33 @@
+name: buildso
+on: workflow_dispatch
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find NDK
+        run: |
+          ls /usr/local/lib/android/sdk/ndk/ 2>/dev/null || true
+          NDKDIR=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | sort -V | tail -1)
+          echo "NDK=$NDKDIR"
+          echo "NDK=$NDKDIR" >> $GITHUB_ENV
+      - name: Build
+        run: |
+          export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          which clang
+          cd dfx
+          clang --target=aarch64-linux-android29 -O2 -nostdlib -nostartfiles -ffreestanding -I. -D_GNU_SOURCE -o splicehelper splicehelper.c
+          echo "splicehelper size=$(stat -c%s splicehelper 2>/dev/null)"
+          clang --target=aarch64-linux-android29 -static -O2 -fno-stack-protector -I. -D_GNU_SOURCE -c -o exp.o exp.c
+          echo "exp rc=$?"
+          clang --target=aarch64-linux-android29 -static -O2 -include stdint.h -I. -D_GNU_SOURCE -c -o elf_parser.o elf_parser.c
+          echo "elf rc=$?"
+          clang --target=aarch64-linux-android29 -c -I. -o libcxx.o libcxx.S
+          echo "asm rc=$?"
+          clang --target=aarch64-linux-android29 -static -o libdfroot.so exp.o libcxx.o elf_parser.o
+          echo "link rc=$?"
+          ls -l libdfroot.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: so
+          path: dfx/libdfroot.so
